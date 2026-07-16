@@ -110,6 +110,12 @@ class DiscoveryTests(unittest.TestCase):
         )
         self.assertLessEqual(len(large.diagnostic.encode("utf-8")), 32 * 1024)
         self.assertTrue(large.diagnostic.endswith("TAIL"))
+        invalid = self.assert_discovery_error(
+            "stderr-invalid",
+            "exited before responding",
+        )
+        self.assertLessEqual(len(invalid.diagnostic.encode("utf-8")), 32 * 1024)
+        self.assertTrue(invalid.diagnostic.endswith("TAIL"))
 
     def test_timeout_returns_after_child_cleanup(self):
         loop = asyncio.new_event_loop()

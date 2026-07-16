@@ -230,7 +230,12 @@ async def discover(command: Sequence[str], timeout: float = 30.0) -> Discovery:
         await _shutdown(process)
         await stderr_task
 
-    diagnostic = stderr_tail.decode("utf-8", errors="replace").rstrip()
+    diagnostic_bytes = stderr_tail.decode(
+        "utf-8", errors="replace"
+    ).encode("utf-8")
+    diagnostic = diagnostic_bytes[-STDERR_LIMIT:].decode(
+        "utf-8", errors="ignore"
+    ).rstrip()
     if failure is not None:
         if isinstance(failure, DiscoveryError):
             raise DiscoveryError(str(failure), diagnostic) from failure

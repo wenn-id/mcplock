@@ -50,6 +50,7 @@ def main():
             "malformed",
             "stderr-exit",
             "stderr-large",
+            "stderr-invalid",
             "hang",
             "missing-tools",
             "unsupported",
@@ -74,6 +75,10 @@ def main():
         return
     if args.scenario == "stderr-large":
         sys.stderr.buffer.write(b"x" * 40000 + b"TAIL\n")
+        sys.stderr.buffer.flush()
+        return
+    if args.scenario == "stderr-invalid":
+        sys.stderr.buffer.write(b"\xff" * 40000 + b"TAIL\n")
         sys.stderr.buffer.flush()
         return
     if args.scenario == "hang":
