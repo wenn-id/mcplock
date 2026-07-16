@@ -1,10 +1,14 @@
 from copy import deepcopy
 import json
 import math
+from pathlib import Path
+import tempfile
 import unittest
+from unittest.mock import patch
 
 from mcplock.contract import ContractError, build_lock, canonicalize, serialize_lock
 from mcplock.contract import Change, compare_locks
+from mcplock.contract import load_lock, write_lock
 
 
 class ContractArtifactTests(unittest.TestCase):
@@ -300,6 +304,45 @@ class CompatibilityTests(unittest.TestCase):
     def test_unchanged_contract_has_no_changes(self):
         lock = make_lock()
         self.assertEqual(compare_locks(lock, deepcopy(lock)), [])
+
+
+class LockfileIoTests(unittest.TestCase):
+    def test_write_and_load_round_trip(self):
+        lock = make_lock()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mcp.lock.json"
+            write_lock(path, lock)
+            self.assertEqual(load_lock(path), lock)
+            self.assertEqual(path.read_bytes(), serialize_lock(lock))
+
+    def test_replace_failure_preserves_old_file_and_removes_temporary(self):
+        lock = make_lock()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mcp.lock.json"
+            path.write_text("original", encoding="utf-8")
+            with patch("mcplock.contract.os.replace", side_effect=OSError("denied")):
+                with self.assertRaises(OSError):
+                    write_lock(path, lock)
+            self.assertEqual(path.read_text(encoding="utf-8"), "original")
+            self.assertEqual(list(Path(directory).glob(".mcp.lock.json.*")), [])
+
+    def test_load_rejects_bad_json_version_and_stats(self):
+        cases = [
+            b"not-json",
+            b"\xff",
+            b'{"lockVersion":2}\n',
+            serialize_lock({
+                **make_lock(),
+                "stats": {"definitionBytes": 0, "toolCount": 1},
+            }),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mcp.lock.json"
+            for content in cases:
+                with self.subTest(content=content):
+                    path.write_bytes(content)
+                    with self.assertRaises(ContractError):
+                        load_lock(path)
 
 
 if __name__ == "__main__":

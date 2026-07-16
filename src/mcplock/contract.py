@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import os
+from pathlib import Path
+import tempfile
 from typing import Any
 
 LOCK_VERSION = 1
@@ -128,6 +131,59 @@ def serialize_lock(lock: dict[str, Any]) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def _reject_constant(value):
+    raise ValueError(f"invalid JSON number: {value}")
+
+
+def load_lock(path):
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        raise ContractError(
+            f"lockfile not found: {path}; run mcplock update first"
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise ContractError(f"invalid lockfile JSON: {path}") from exc
+    try:
+        lock = json.loads(raw, parse_constant=_reject_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ContractError(f"invalid lockfile JSON: {path}") from exc
+    if not isinstance(lock, dict) or lock.get("lockVersion") != LOCK_VERSION:
+        raise ContractError(f"unsupported lockfile version in {path}")
+    required = {"protocolVersion", "server", "stats", "tools"}
+    if not required.issubset(lock):
+        raise ContractError(f"lockfile is missing required fields: {path}")
+    try:
+        rebuilt = build_lock(lock["protocolVersion"], lock["server"], lock["tools"])
+    except (KeyError, TypeError, ContractError) as exc:
+        raise ContractError(f"invalid lockfile structure: {path}") from exc
+    if rebuilt != lock:
+        raise ContractError(f"lockfile is not canonical or has invalid stats: {path}")
+    return lock
+
+
+def write_lock(path, lock):
+    if not path.parent.is_dir():
+        raise OSError(f"lockfile directory does not exist: {path.parent}")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{path.name}.",
+            dir=path.parent,
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(serialize_lock(lock))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _types(schema):
