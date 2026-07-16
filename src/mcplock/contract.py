@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import math
 from typing import Any
@@ -7,10 +8,25 @@ from typing import Any
 LOCK_VERSION = 1
 Json = dict[str, Any] | list[Any] | str | int | float | bool | None
 _SCALAR = (str, int, float, bool, type(None))
+_ALL_TYPES = frozenset({
+    "array", "boolean", "integer", "null", "number", "object", "string",
+})
+_KNOWN_SCHEMA_KEYS = {
+    "type", "enum", "properties", "required", "additionalProperties",
+}
+_ORDER = {"breaking": 0, "warning": 1, "info": 2}
+_MISSING = object()
 
 
 class ContractError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class Change:
+    severity: str
+    path: str
+    message: str
 
 
 def _json_key(value: Json) -> str:
@@ -112,3 +128,211 @@ def serialize_lock(lock: dict[str, Any]) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def _types(schema):
+    value = schema.get("type", _MISSING)
+    if value is _MISSING:
+        return _ALL_TYPES
+    if isinstance(value, str):
+        return frozenset({value})
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return frozenset(value)
+    return None
+
+
+def _strings(value):
+    return set(value) if isinstance(value, list) and all(
+        isinstance(item, str) for item in value
+    ) else None
+
+
+def _enums(value):
+    return {_json_key(item): item for item in value} if isinstance(value, list) else None
+
+
+def _raw(mapping, key):
+    return mapping[key] if key in mapping else _MISSING
+
+
+def _emit(changes, severity, path, message):
+    changes.append(Change(severity, path, message))
+
+
+def _compare_schema(baseline, current, path, changes):
+    if baseline == current:
+        return
+
+    old_types, new_types = _types(baseline), _types(current)
+    if old_types is not None and new_types is not None and old_types != new_types:
+        if not old_types.issubset(new_types):
+            _emit(
+                changes,
+                "breaking",
+                f"{path}.type",
+                "accepted JSON types narrowed",
+            )
+        elif old_types < new_types:
+            _emit(
+                changes,
+                "info",
+                f"{path}.type",
+                "accepted JSON types broadened",
+            )
+    elif _raw(baseline, "type") != _raw(current, "type"):
+        _emit(changes, "warning", f"{path}.type", "type expression changed")
+
+    old_required = _strings(baseline.get("required", []))
+    new_required = _strings(current.get("required", []))
+    if old_required is not None and new_required is not None:
+        for name in sorted(new_required - old_required):
+            _emit(
+                changes,
+                "breaking",
+                f"{path}.required.{name}",
+                "input became required",
+            )
+        for name in sorted(old_required - new_required):
+            _emit(
+                changes,
+                "info",
+                f"{path}.required.{name}",
+                "input became optional",
+            )
+    elif _raw(baseline, "required") != _raw(current, "required"):
+        _emit(changes, "warning", f"{path}.required", "required expression changed")
+        new_required = set()
+
+    old_properties = baseline.get("properties", {})
+    new_properties = current.get("properties", {})
+    if isinstance(old_properties, dict) and isinstance(new_properties, dict):
+        for name in sorted(old_properties.keys() - new_properties.keys()):
+            _emit(
+                changes,
+                "breaking",
+                f"{path}.properties.{name}",
+                "input property removed",
+            )
+        for name in sorted(new_properties.keys() - old_properties.keys()):
+            if new_required is None or name not in new_required:
+                _emit(
+                    changes,
+                    "info",
+                    f"{path}.properties.{name}",
+                    "optional input property added",
+                )
+        for name in sorted(old_properties.keys() & new_properties.keys()):
+            old_child, new_child = old_properties[name], new_properties[name]
+            child_path = f"{path}.properties.{name}"
+            if isinstance(old_child, dict) and isinstance(new_child, dict):
+                _compare_schema(old_child, new_child, child_path, changes)
+            elif old_child != new_child:
+                _emit(changes, "warning", child_path, "property schema changed")
+    elif old_properties != new_properties:
+        _emit(changes, "warning", f"{path}.properties", "properties expression changed")
+
+    old_enum_raw = _raw(baseline, "enum")
+    new_enum_raw = _raw(current, "enum")
+    old_enum, new_enum = _enums(old_enum_raw), _enums(new_enum_raw)
+    if old_enum is not None and new_enum is not None:
+        for key in sorted(old_enum.keys() - new_enum.keys()):
+            _emit(
+                changes,
+                "breaking",
+                f"{path}.enum",
+                f"enum value removed: {_json_key(old_enum[key])}",
+            )
+        for key in sorted(new_enum.keys() - old_enum.keys()):
+            _emit(
+                changes,
+                "info",
+                f"{path}.enum",
+                f"enum value added: {_json_key(new_enum[key])}",
+            )
+    elif old_enum_raw != new_enum_raw:
+        _emit(changes, "warning", f"{path}.enum", "enum expression changed")
+
+    old_extra = baseline.get("additionalProperties", True)
+    new_extra = current.get("additionalProperties", True)
+    if old_extra is not False and new_extra is False:
+        _emit(
+            changes,
+            "breaking",
+            f"{path}.additionalProperties",
+            "additional properties forbidden",
+        )
+    elif old_extra is False and new_extra is not False:
+        _emit(
+            changes,
+            "info",
+            f"{path}.additionalProperties",
+            "additional properties allowed",
+        )
+    elif old_extra != new_extra:
+        _emit(
+            changes,
+            "warning",
+            f"{path}.additionalProperties",
+            "additionalProperties schema changed",
+        )
+
+    for key in sorted((baseline.keys() | current.keys()) - _KNOWN_SCHEMA_KEYS):
+        if _raw(baseline, key) != _raw(current, key):
+            _emit(changes, "warning", f"{path}.{key}", "schema keyword changed")
+
+
+def compare_locks(baseline, current):
+    changes = []
+    if baseline["protocolVersion"] != current["protocolVersion"]:
+        _emit(changes, "warning", "protocolVersion", "protocol version changed")
+    for key in ("name", "version"):
+        if baseline["server"][key] != current["server"][key]:
+            _emit(changes, "warning", f"server.{key}", "server identity changed")
+
+    old_tools = {item["name"]: item for item in baseline["tools"]}
+    new_tools = {item["name"]: item for item in current["tools"]}
+    for name in sorted(old_tools.keys() - new_tools.keys()):
+        _emit(changes, "breaking", f"tools.{name}", "tool removed")
+    for name in sorted(new_tools.keys() - old_tools.keys()):
+        _emit(changes, "info", f"tools.{name}", "tool added")
+    for name in sorted(old_tools.keys() & new_tools.keys()):
+        old_tool, new_tool = old_tools[name], new_tools[name]
+        _compare_schema(
+            old_tool["inputSchema"],
+            new_tool["inputSchema"],
+            f"tools.{name}.inputSchema",
+            changes,
+        )
+        metadata = (old_tool.keys() | new_tool.keys()) - {"name", "inputSchema"}
+        for key in sorted(metadata):
+            if _raw(old_tool, key) != _raw(new_tool, key):
+                _emit(
+                    changes,
+                    "warning",
+                    f"tools.{name}.{key}",
+                    "tool metadata changed",
+                )
+
+    old_bytes = baseline["stats"]["definitionBytes"]
+    new_bytes = current["stats"]["definitionBytes"]
+    growth = new_bytes - old_bytes
+    if growth > 0 and (growth >= 1024 or (old_bytes > 0 and growth / old_bytes >= 0.10)):
+        percent = round(growth / old_bytes * 100) if old_bytes else 0
+        _emit(
+            changes,
+            "warning",
+            "stats.definitionBytes",
+            f"context grew {old_bytes} -> {new_bytes} bytes (+{percent}%)",
+        )
+    elif growth < 0:
+        _emit(
+            changes,
+            "info",
+            "stats.definitionBytes",
+            f"context shrank {old_bytes} -> {new_bytes} bytes",
+        )
+
+    return sorted(
+        changes,
+        key=lambda item: (_ORDER[item.severity], item.path, item.message),
+    )
