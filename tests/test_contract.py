@@ -344,6 +344,31 @@ class LockfileIoTests(unittest.TestCase):
                     with self.assertRaises(ContractError):
                         load_lock(path)
 
+    def test_load_rejects_non_integer_versions_and_stats(self):
+        lock = make_lock()
+        cases = [
+            {**lock, "lockVersion": True},
+            {**lock, "lockVersion": 1.0},
+            {
+                **lock,
+                "stats": {**lock["stats"], "toolCount": True},
+            },
+            {
+                **lock,
+                "stats": {
+                    **lock["stats"],
+                    "definitionBytes": float(lock["stats"]["definitionBytes"]),
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mcp.lock.json"
+            for malformed in cases:
+                with self.subTest(malformed=malformed):
+                    path.write_bytes(serialize_lock(malformed))
+                    with self.assertRaises(ContractError):
+                        load_lock(path)
+
 
 if __name__ == "__main__":
     unittest.main()

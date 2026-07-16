@@ -150,11 +150,21 @@ def load_lock(path):
         lock = json.loads(raw, parse_constant=_reject_constant)
     except (json.JSONDecodeError, ValueError) as exc:
         raise ContractError(f"invalid lockfile JSON: {path}") from exc
-    if not isinstance(lock, dict) or lock.get("lockVersion") != LOCK_VERSION:
+    if (
+        not isinstance(lock, dict)
+        or type(lock.get("lockVersion")) is not int
+        or lock["lockVersion"] != LOCK_VERSION
+    ):
         raise ContractError(f"unsupported lockfile version in {path}")
     required = {"protocolVersion", "server", "stats", "tools"}
     if not required.issubset(lock):
         raise ContractError(f"lockfile is missing required fields: {path}")
+    stats = lock["stats"]
+    if not isinstance(stats, dict) or any(
+        type(stats.get(key)) is not int
+        for key in ("definitionBytes", "toolCount")
+    ):
+        raise ContractError(f"invalid lockfile statistics: {path}")
     try:
         rebuilt = build_lock(lock["protocolVersion"], lock["server"], lock["tools"])
     except (KeyError, TypeError, ContractError) as exc:

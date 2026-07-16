@@ -9,7 +9,7 @@ from unittest.mock import patch
 import warnings
 
 from mcplock.cli import main
-from mcplock.contract import build_lock, write_lock
+from mcplock.contract import build_lock, serialize_lock, write_lock
 
 FAKE_SERVER = Path(__file__).with_name("fake_server.py")
 
@@ -92,6 +92,31 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(code, 2)
             self.assertIn("unsupported lockfile protocol version", error)
+
+    def test_malformed_integer_lock_exits_two(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "mcp.lock.json"
+            malformed = build_lock(
+                "2025-11-25",
+                {"name": "fixture", "version": "1.0.0"},
+                [{"name": "read_file", "inputSchema": {"type": "object"}}],
+            )
+            malformed["stats"]["toolCount"] = True
+            path.write_bytes(serialize_lock(malformed))
+            code, output, error = self.invoke(
+                ["check", "--lock", str(path), "--", *server("baseline")]
+            )
+            self.assertEqual((code, output), (2, ""))
+            self.assertIn("invalid lockfile", error)
+
+    def test_server_command_requires_separator(self):
+        for action in ("update", "check"):
+            with self.subTest(action=action):
+                with patch("mcplock.cli.discover") as discover:
+                    code, output, error = self.invoke([action, "fixture"])
+                discover.assert_not_called()
+                self.assertEqual((code, output), (2, ""))
+                self.assertIn("server command is required after --", error)
 
     def test_warning_only_check_exits_zero(self):
         with tempfile.TemporaryDirectory() as directory:

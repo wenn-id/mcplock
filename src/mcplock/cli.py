@@ -61,9 +61,7 @@ def render_changes(changes):
 def main(argv=None):
     args = parser().parse_args(argv)
     command = list(args.server_command)
-    if command and command[0] == "--":
-        command.pop(0)
-    if not command:
+    if not command or command.pop(0) != "--" or not command:
         print("MCPLock error: server command is required after --", file=sys.stderr)
         return 2
     try:
