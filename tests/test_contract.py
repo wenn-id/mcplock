@@ -245,6 +245,42 @@ class CompatibilityTests(unittest.TestCase):
                     message,
                 )
 
+    def test_integer_to_number_is_informational_broadening(self):
+        baseline_tool = make_tool()
+        baseline_tool["inputSchema"]["properties"]["encoding"]["type"] = "integer"
+        current_tool = make_tool()
+        current_tool["inputSchema"]["properties"]["encoding"]["type"] = "number"
+        type_path = "tools.read_file.inputSchema.properties.encoding.type"
+
+        changes = compare_locks(make_lock(baseline_tool), make_lock(current_tool))
+
+        self.assertEqual(
+            [change for change in changes if change.path != "stats.definitionBytes"],
+            [Change("info", type_path, "accepted JSON types broadened")],
+        )
+        self.assertEqual(
+            [
+                (change.severity, change.path)
+                for change in changes
+                if change.path == "stats.definitionBytes"
+            ],
+            [("info", "stats.definitionBytes")],
+        )
+
+    def test_number_to_integer_is_breaking_narrowing(self):
+        baseline_tool = make_tool()
+        baseline_tool["inputSchema"]["properties"]["encoding"]["type"] = "number"
+        current_tool = make_tool()
+        current_tool["inputSchema"]["properties"]["encoding"]["type"] = "integer"
+        type_path = "tools.read_file.inputSchema.properties.encoding.type"
+
+        changes = compare_locks(make_lock(baseline_tool), make_lock(current_tool))
+
+        self.assertEqual(
+            changes,
+            [Change("breaking", type_path, "accepted JSON types narrowed")],
+        )
+
     def test_uncertain_metadata_schema_output_and_server_changes_warn(self):
         changed = make_tool()
         changed["description"] = "Changed guidance"

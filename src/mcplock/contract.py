@@ -201,10 +201,12 @@ def _types(schema):
     if value is _MISSING:
         return _ALL_TYPES
     if isinstance(value, str):
-        return frozenset({value})
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        return frozenset(value)
-    return None
+        result = frozenset({value})
+    elif isinstance(value, list) and all(isinstance(item, str) for item in value):
+        result = frozenset(value)
+    else:
+        return None
+    return result | {"integer"} if "number" in result else result
 
 
 def _strings(value):
