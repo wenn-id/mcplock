@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "mcplock"
 version = "0.1.0"
 description = "Catch breaking MCP tool changes before your agents do"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 keywords = ["ai-agents", "mcp", "model-context-protocol", "testing"]
