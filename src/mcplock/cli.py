@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import math
 from pathlib import Path
 import sys
 
@@ -17,7 +18,7 @@ from .stdio import DiscoveryError, SUPPORTED_PROTOCOL_VERSIONS, discover
 
 def positive_timeout(value):
     timeout = float(value)
-    if timeout <= 0:
+    if not math.isfinite(timeout) or timeout <= 0:
         raise argparse.ArgumentTypeError("timeout must be greater than zero")
     return timeout
 

@@ -4,6 +4,7 @@ import asyncio
 from contextlib import suppress
 from dataclasses import dataclass
 import json
+import math
 from typing import Any, Sequence
 
 SUPPORTED_PROTOCOL_VERSIONS = frozenset({
@@ -52,12 +53,7 @@ class _Client:
 
     async def _read(self):
         try:
-            line = await asyncio.wait_for(
-                self.process.stdout.readline(),
-                timeout=self.timeout,
-            )
-        except asyncio.TimeoutError as exc:
-            raise DiscoveryError("MCP request timed out") from exc
+            line = await self.process.stdout.readline()
         except ValueError as exc:
             raise DiscoveryError("MCP message exceeds 16 MiB") from exc
         if not line:
@@ -79,7 +75,11 @@ class _Client:
         return message
 
     async def notify(self, method):
-        await self._send({"jsonrpc": "2.0", "method": method})
+        try:
+            async with asyncio.timeout(self.timeout):
+                await self._send({"jsonrpc": "2.0", "method": method})
+        except TimeoutError as exc:
+            raise DiscoveryError("MCP request timed out") from exc
 
     async def request(self, method, params=None):
         request_id = self.next_id
@@ -87,30 +87,42 @@ class _Client:
         request = {"jsonrpc": "2.0", "id": request_id, "method": method}
         if params is not None:
             request["params"] = params
-        await self._send(request)
-        while True:
-            response = await self._read()
-            if "method" in response and "id" not in response:
-                continue
-            if "method" in response and "id" in response:
-                await self._send({
-                    "jsonrpc": "2.0",
-                    "id": response["id"],
-                    "error": {"code": -32601, "message": "Method not found"},
-                })
-                continue
-            if response.get("id") != request_id:
-                raise DiscoveryError("MCP response used an unexpected request id")
-            if "error" in response:
-                error = response["error"]
-                text = error.get("message", "unknown error") if isinstance(
-                    error, dict
-                ) else str(error)
-                raise DiscoveryError(f"MCP {method} failed: {text}")
-            result = response.get("result")
-            if not isinstance(result, dict):
-                raise DiscoveryError(f"MCP {method} returned a non-object result")
-            return result
+        try:
+            async with asyncio.timeout(self.timeout):
+                await self._send(request)
+                while True:
+                    response = await self._read()
+                    if "method" in response and "id" not in response:
+                        continue
+                    if "method" in response and "id" in response:
+                        await self._send({
+                            "jsonrpc": "2.0",
+                            "id": response["id"],
+                            "error": {
+                                "code": -32601,
+                                "message": "Method not found",
+                            },
+                        })
+                        continue
+                    response_id = response.get("id")
+                    if type(response_id) is not int or response_id != request_id:
+                        raise DiscoveryError(
+                            "MCP response used an unexpected request id"
+                        )
+                    if "error" in response:
+                        error = response["error"]
+                        text = error.get(
+                            "message", "unknown error"
+                        ) if isinstance(error, dict) else str(error)
+                        raise DiscoveryError(f"MCP {method} failed: {text}")
+                    result = response.get("result")
+                    if not isinstance(result, dict):
+                        raise DiscoveryError(
+                            f"MCP {method} returned a non-object result"
+                        )
+                    return result
+        except TimeoutError as exc:
+            raise DiscoveryError("MCP request timed out") from exc
 
 
 async def _drain_stderr(stream, tail):
@@ -142,7 +154,7 @@ async def _shutdown(process):
 async def discover(command: Sequence[str], timeout: float = 30.0) -> Discovery:
     if not command:
         raise DiscoveryError("server command is required")
-    if timeout <= 0:
+    if not math.isfinite(timeout) or timeout <= 0:
         raise DiscoveryError("timeout must be greater than zero")
     try:
         process = await asyncio.create_subprocess_exec(

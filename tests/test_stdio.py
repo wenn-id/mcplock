@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 from mcplock.stdio import (
     Discovery,
@@ -66,6 +67,12 @@ class DiscoveryTests(unittest.TestCase):
                     ["read_file"],
                 )
 
+    def test_response_id_requires_an_exact_integer(self):
+        self.assert_discovery_error(
+            "boolean-id",
+            "unexpected request id",
+        )
+
     def test_protocol_failures_are_actionable(self):
         cases = {
             "duplicate": "duplicate tool names",
@@ -127,11 +134,37 @@ class DiscoveryTests(unittest.TestCase):
         finally:
             loop.close()
 
+    def test_request_timeout_is_one_total_deadline(self):
+        async def run():
+            return await asyncio.wait_for(
+                discover(command("notification-stream"), timeout=1.0),
+                timeout=5.0,
+            )
+
+        with self.assertRaisesRegex(DiscoveryError, "timed out"):
+            asyncio.run(run())
+
     def test_arguments_are_validated_before_launch(self):
         with self.assertRaisesRegex(DiscoveryError, "command is required"):
             asyncio.run(discover([], timeout=1))
         with self.assertRaisesRegex(DiscoveryError, "greater than zero"):
             asyncio.run(discover(command("baseline"), timeout=0))
+
+    def test_non_finite_timeouts_are_validated_before_launch(self):
+        for timeout in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout):
+                with patch(
+                    "mcplock.stdio.asyncio.create_subprocess_exec",
+                    side_effect=OSError("launch attempted"),
+                ) as launch:
+                    with self.assertRaisesRegex(
+                        DiscoveryError,
+                        "timeout must be greater than zero",
+                    ):
+                        asyncio.run(
+                            discover(command("baseline"), timeout=timeout)
+                        )
+                    launch.assert_not_called()
 
 
 if __name__ == "__main__":

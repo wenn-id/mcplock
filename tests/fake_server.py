@@ -40,6 +40,8 @@ def main():
             "pagination",
             "legacy",
             "notification",
+            "notification-stream",
+            "boolean-id",
             "client-request",
             "duplicate",
             "cycle",
@@ -95,6 +97,10 @@ def main():
     initialize = receive()
     if args.scenario == "notification":
         send({"jsonrpc": "2.0", "method": "notifications/progress"})
+    if args.scenario == "notification-stream":
+        for _ in range(22):
+            send({"jsonrpc": "2.0", "method": "notifications/progress"})
+            time.sleep(0.05)
     if args.scenario == "client-request":
         send({"jsonrpc": "2.0", "id": 900, "method": "roots/list"})
         rejection = receive()
@@ -110,7 +116,7 @@ def main():
     capabilities = {} if args.scenario == "missing-tools" else {"tools": {}}
     send({
         "jsonrpc": "2.0",
-        "id": initialize["id"],
+        "id": True if args.scenario == "boolean-id" else initialize["id"],
         "result": {
             "protocolVersion": version,
             "capabilities": capabilities,

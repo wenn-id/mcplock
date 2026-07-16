@@ -1,3 +1,4 @@
+import argparse
 from contextlib import redirect_stderr, redirect_stdout
 import gc
 from io import StringIO
@@ -8,7 +9,7 @@ import unittest
 from unittest.mock import patch
 import warnings
 
-from mcplock.cli import main
+from mcplock.cli import main, positive_timeout
 from mcplock.contract import build_lock, serialize_lock, write_lock
 
 FAKE_SERVER = Path(__file__).with_name("fake_server.py")
@@ -24,6 +25,15 @@ class CliTests(unittest.TestCase):
         with redirect_stdout(stdout), redirect_stderr(stderr):
             code = main(args)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def test_positive_timeout_rejects_non_finite_values(self):
+        for value in ("nan", "inf", "-inf"):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(
+                    argparse.ArgumentTypeError,
+                    "timeout must be greater than zero",
+                ):
+                    positive_timeout(value)
 
     def test_update_then_compatible_check(self):
         with tempfile.TemporaryDirectory() as directory:
