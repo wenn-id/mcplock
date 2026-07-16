@@ -3,7 +3,12 @@ from pathlib import Path
 import sys
 import unittest
 
-from mcplock.stdio import Discovery, SUPPORTED_PROTOCOL_VERSIONS, discover
+from mcplock.stdio import (
+    Discovery,
+    DiscoveryError,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    discover,
+)
 
 FAKE_SERVER = Path(__file__).with_name("fake_server.py")
 
@@ -12,7 +17,23 @@ def command(scenario):
     return [sys.executable, str(FAKE_SERVER), "--scenario", scenario]
 
 
+def raw_command(payload):
+    script = (
+        "import sys;"
+        f"sys.stdout.buffer.write({payload!r});"
+        "sys.stdout.buffer.flush();"
+        "sys.stdout.close()"
+    )
+    return [sys.executable, "-c", script]
+
+
 class DiscoveryTests(unittest.TestCase):
+    def assert_discovery_error(self, scenario, text, timeout=2.0):
+        with self.assertRaises(DiscoveryError) as caught:
+            asyncio.run(discover(command(scenario), timeout=timeout))
+        self.assertIn(text, str(caught.exception))
+        return caught.exception
+
     def test_supported_versions_are_exact(self):
         self.assertEqual(SUPPORTED_PROTOCOL_VERSIONS, {
             "2025-11-25",
@@ -35,6 +56,76 @@ class DiscoveryTests(unittest.TestCase):
     def test_accepts_oldest_supported_revision(self):
         result = asyncio.run(discover(command("legacy"), timeout=2.0))
         self.assertEqual(result.protocol_version, "2024-11-05")
+
+    def test_notifications_and_rejected_client_requests_continue(self):
+        for scenario in ("notification", "client-request"):
+            with self.subTest(scenario=scenario):
+                result = asyncio.run(discover(command(scenario), timeout=2.0))
+                self.assertEqual(
+                    [item["name"] for item in result.tools],
+                    ["read_file"],
+                )
+
+    def test_protocol_failures_are_actionable(self):
+        cases = {
+            "duplicate": "duplicate tool names",
+            "cycle": "cursor repeated",
+            "invalid-tool": "valid name",
+            "invalid-cursor": "invalid nextCursor",
+            "rpc-error": "tools/list failed: fixture failure",
+            "bad-jsonrpc": "JSON-RPC 2.0 object",
+            "malformed": "invalid MCP stdout",
+            "missing-tools": "tools capability",
+            "unsupported": "unsupported MCP protocol version",
+            "oversized": "exceeds 16 MiB",
+        }
+        for scenario, text in cases.items():
+            with self.subTest(scenario=scenario):
+                self.assert_discovery_error(scenario, text)
+        for payload in (
+            b'{"jsonrpc":"2.0","id":1,"result":{}}',
+            b'{"jsonrpc":"2.0","id":1,"result":NaN}\n',
+            b'{"jsonrpc":"2.0","id":1,"result":Infinity}\n',
+        ):
+            with self.subTest(payload=payload):
+                with self.assertRaisesRegex(
+                    DiscoveryError,
+                    "invalid MCP stdout",
+                ):
+                    asyncio.run(discover(raw_command(payload), timeout=2.0))
+
+    def test_stderr_is_bounded_diagnostic_data(self):
+        error = self.assert_discovery_error(
+            "stderr-exit",
+            "exited before responding",
+        )
+        self.assertEqual(
+            error.diagnostic,
+            "fixture launch failed: secret-free diagnostic",
+        )
+        self.assertLessEqual(len(error.diagnostic.encode("utf-8")), 32 * 1024)
+        large = self.assert_discovery_error(
+            "stderr-large",
+            "exited before responding",
+        )
+        self.assertLessEqual(len(large.diagnostic.encode("utf-8")), 32 * 1024)
+        self.assertTrue(large.diagnostic.endswith("TAIL"))
+
+    def test_timeout_returns_after_child_cleanup(self):
+        loop = asyncio.new_event_loop()
+        started = loop.time()
+        try:
+            with self.assertRaisesRegex(DiscoveryError, "timed out"):
+                loop.run_until_complete(discover(command("hang"), timeout=0.1))
+            self.assertLess(loop.time() - started, 2.0)
+        finally:
+            loop.close()
+
+    def test_arguments_are_validated_before_launch(self):
+        with self.assertRaisesRegex(DiscoveryError, "command is required"):
+            asyncio.run(discover([], timeout=1))
+        with self.assertRaisesRegex(DiscoveryError, "greater than zero"):
+            asyncio.run(discover(command("baseline"), timeout=0))
 
 
 if __name__ == "__main__":

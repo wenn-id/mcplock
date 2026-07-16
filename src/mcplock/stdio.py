@@ -17,6 +17,10 @@ MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 STDERR_LIMIT = 32 * 1024
 
 
+def _reject_json_constant(value):
+    raise ValueError(f"invalid JSON constant: {value}")
+
+
 class DiscoveryError(RuntimeError):
     def __init__(self, message, diagnostic=""):
         super().__init__(message)
@@ -61,8 +65,13 @@ class _Client:
         if len(line) > MAX_MESSAGE_BYTES:
             raise DiscoveryError("MCP message exceeds 16 MiB")
         try:
-            message = json.loads(line.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            if not line.endswith(b"\n"):
+                raise ValueError("MCP message is not newline-terminated")
+            message = json.loads(
+                line.decode("utf-8"),
+                parse_constant=_reject_json_constant,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
             preview = line[:160].decode("utf-8", errors="replace").rstrip()
             raise DiscoveryError(f"invalid MCP stdout: {preview}") from exc
         if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
