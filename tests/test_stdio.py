@@ -1,6 +1,10 @@
 import asyncio
+import os
 from pathlib import Path
+import signal
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -133,6 +137,57 @@ class DiscoveryTests(unittest.TestCase):
             self.assertLess(loop.time() - started, 2.0)
         finally:
             loop.close()
+
+    def test_descendant_inherited_stderr_does_not_block_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(FAKE_SERVER.parent.parent / "src")
+            pid_path = Path(directory) / "descendant.pid"
+            env["MCPLOCK_DESCENDANT_PID_FILE"] = str(pid_path)
+            code = (
+                "import asyncio;"
+                "from mcplock.stdio import discover;"
+                f"result = asyncio.run(discover({command('stderr-descendant')!r}, "
+                "timeout=1.0));"
+                "print([item['name'] for item in result.tools])"
+            )
+            process = subprocess.Popen(
+                [sys.executable, "-c", code],
+                env=env,
+                start_new_session=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                try:
+                    stdout, stderr = process.communicate(timeout=3.0)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+                    self.fail(
+                        "discover() remained blocked after a descendant inherited stderr"
+                    )
+                self.assertEqual(process.returncode, 0, stderr)
+                self.assertEqual(stdout.strip(), "['read_file']")
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.communicate()
+                if pid_path.exists():
+                    descendant_pid = int(pid_path.read_text(encoding="ascii"))
+                    if os.name == "nt":
+                        subprocess.run(
+                            ["taskkill", "/PID", str(descendant_pid), "/T", "/F"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        try:
+                            os.kill(descendant_pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
 
     def test_request_timeout_is_one_total_deadline(self):
         async def run():
