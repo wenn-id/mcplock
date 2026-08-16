@@ -176,10 +176,18 @@ class DiscoveryTests(unittest.TestCase):
                     process.communicate()
                 if pid_path.exists():
                     descendant_pid = int(pid_path.read_text(encoding="ascii"))
-                    try:
-                        os.kill(descendant_pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    if os.name == "nt":
+                        subprocess.run(
+                            ["taskkill", "/PID", str(descendant_pid), "/T", "/F"],
+                            check=False,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        try:
+                            os.kill(descendant_pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
 
     def test_request_timeout_is_one_total_deadline(self):
         async def run():
