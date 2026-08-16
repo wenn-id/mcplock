@@ -240,7 +240,9 @@ async def discover(command: Sequence[str], timeout: float = 30.0) -> Discovery:
         failure = exc
     finally:
         await _shutdown(process)
-        await stderr_task
+        stderr_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await stderr_task
 
     diagnostic_bytes = stderr_tail.decode(
         "utf-8", errors="replace"

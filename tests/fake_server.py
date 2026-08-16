@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+import subprocess
 import sys
 import time
 
@@ -53,6 +55,7 @@ def main():
             "stderr-exit",
             "stderr-large",
             "stderr-invalid",
+            "stderr-descendant",
             "hang",
             "missing-tools",
             "unsupported",
@@ -83,6 +86,16 @@ def main():
         sys.stderr.buffer.write(b"\xff" * 40000 + b"TAIL\n")
         sys.stderr.buffer.flush()
         return
+    if args.scenario == "stderr-descendant":
+        pid_file = os.environ["MCPLOCK_DESCENDANT_PID_FILE"]
+        descendant = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=sys.stderr,
+        )
+        with open(pid_file, "w", encoding="ascii") as handle:
+            handle.write(str(descendant.pid))
     if args.scenario == "hang":
         time.sleep(10)
         return
