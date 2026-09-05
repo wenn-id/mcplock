@@ -45,6 +45,35 @@ Exit codes are `0` for compatible or warning-only changes, `1` for certain
 breaking changes, `2` for usage/lockfile/launch/protocol failures, and `130`
 for user interruption.
 
+## Machine-readable output
+
+Add `--json` to either command to get one JSON document on stdout instead of
+the human report. Exit codes are unchanged, so an existing CI gate keeps
+working; errors still go to stderr and leave stdout empty.
+
+~~~console
+mcplock check --json -- python my_server.py
+~~~
+
+~~~json
+{
+  "changes": [
+    {
+      "message": "input became required",
+      "path": "tools.read_file.inputSchema.required.encoding",
+      "severity": "breaking"
+    }
+  ],
+  "lockVersion": 1,
+  "protocolVersion": "2025-11-25",
+  "server": {"name": "fixture", "version": "1.0.0"},
+  "summary": {"breaking": 1, "info": 0, "warning": 0}
+}
+~~~
+
+`update --json` reports the written path and the resulting `stats` instead.
+Keys are sorted, so the output is stable enough to diff between runs.
+
 ## What counts as breaking
 
 MCPLock fails for a removed tool, newly required input, removed input

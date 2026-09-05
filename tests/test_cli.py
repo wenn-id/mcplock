@@ -1,6 +1,7 @@
 import argparse
 from contextlib import redirect_stderr, redirect_stdout
 import gc
+import json
 from io import StringIO
 from pathlib import Path
 import sys
@@ -149,6 +150,59 @@ class CliTests(unittest.TestCase):
             gc.collect()
         self.assertEqual(code, 130)
         self.assertEqual(caught, [])
+
+    def test_json_check_emits_one_document_and_keeps_exit_codes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock = str(Path(directory) / "mcp.lock.json")
+            self.invoke(["update", "--lock", lock, "--", *server("baseline")])
+
+            code, output, error = self.invoke(
+                ["check", "--json", "--lock", lock, "--", *server("baseline")]
+            )
+            self.assertEqual((code, error), (0, ""))
+            document = json.loads(output)
+            self.assertEqual(document["lockVersion"], 1)
+            self.assertEqual(document["server"]["name"], "fixture")
+            self.assertEqual(
+                document["summary"],
+                {"breaking": 0, "warning": 0, "info": 0},
+            )
+            self.assertEqual(document["changes"], [])
+
+            code, output, error = self.invoke(
+                ["check", "--json", "--lock", lock, "--", *server("breaking")]
+            )
+            self.assertEqual((code, error), (1, ""))
+            document = json.loads(output)
+            self.assertEqual(document["summary"]["breaking"], 1)
+            self.assertEqual(
+                sorted(document["changes"][0]),
+                ["message", "path", "severity"],
+            )
+            self.assertEqual(document["changes"][0]["severity"], "breaking")
+            self.assertNotIn("MCPLock", output)
+
+    def test_json_update_emits_one_document(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock = Path(directory) / "mcp.lock.json"
+            code, output, error = self.invoke(
+                ["update", "--json", "--lock", str(lock), "--", *server("baseline")]
+            )
+            self.assertEqual((code, error), (0, ""))
+            document = json.loads(output)
+            self.assertEqual(document["lock"], str(lock))
+            self.assertEqual(document["lockVersion"], 1)
+            self.assertEqual(document["stats"]["toolCount"], 1)
+            self.assertNotIn("MCPLock", output)
+
+    def test_json_failure_keeps_stdout_empty(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = str(Path(directory) / "missing.json")
+            code, output, error = self.invoke(
+                ["check", "--json", "--lock", missing, "--", *server("baseline")]
+            )
+            self.assertEqual((code, output), (2, ""))
+            self.assertIn("mcplock update", error)
 
 
 if __name__ == "__main__":
