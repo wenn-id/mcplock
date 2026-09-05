@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import math
 from pathlib import Path
 import sys
@@ -33,8 +34,45 @@ def parser():
         command = commands.add_parser(action)
         command.add_argument("--lock", type=Path, default=Path("mcp.lock.json"))
         command.add_argument("--timeout", type=positive_timeout, default=30.0)
+        command.add_argument("--json", action="store_true")
         command.add_argument("server_command", nargs=argparse.REMAINDER)
     return result
+
+
+def _emit_json_check(lock, changes):
+    counts = {
+        severity: sum(item.severity == severity for item in changes)
+        for severity in ("breaking", "warning", "info")
+    }
+    document = {
+        "lockVersion": lock["lockVersion"],
+        "protocolVersion": lock["protocolVersion"],
+        "server": lock["server"],
+        "summary": counts,
+        "changes": [
+            {
+                "severity": item.severity,
+                "path": item.path,
+                "message": item.message,
+            }
+            for item in changes
+        ],
+    }
+    return json.dumps(document, sort_keys=True) + "\n"
+
+
+def _emit_json_update(lock, path):
+    return (
+        json.dumps(
+            {
+                "lock": str(path),
+                "lockVersion": lock["lockVersion"],
+                "stats": lock["stats"],
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
 
 
 def render_changes(changes):
@@ -74,10 +112,13 @@ def main(argv=None):
         current = build_lock(result.protocol_version, result.server, result.tools)
         if args.action == "update":
             write_lock(args.lock, current)
-            print(
-                f"MCPLock: wrote {args.lock} "
-                f"({current['stats']['toolCount']} tools)"
-            )
+            if args.json:
+                print(_emit_json_update(current, args.lock), end="")
+            else:
+                print(
+                    f"MCPLock: wrote {args.lock} "
+                    f"({current['stats']['toolCount']} tools)"
+                )
             return 0
         baseline = load_lock(args.lock)
         if baseline["protocolVersion"] not in SUPPORTED_PROTOCOL_VERSIONS:
@@ -86,7 +127,10 @@ def main(argv=None):
                 f"{baseline['protocolVersion']}"
             )
         changes = compare_locks(baseline, current)
-        print(render_changes(changes), end="")
+        if args.json:
+            print(_emit_json_check(current, changes), end="")
+        else:
+            print(render_changes(changes), end="")
         return 1 if any(item.severity == "breaking" for item in changes) else 0
     except KeyboardInterrupt:
         return 130
