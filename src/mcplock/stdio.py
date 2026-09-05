@@ -7,6 +7,8 @@ import json
 import math
 from typing import Any, Sequence
 
+from . import __version__
+
 SUPPORTED_PROTOCOL_VERSIONS = frozenset({
     "2025-11-25",
     "2025-06-18",
@@ -16,6 +18,7 @@ SUPPORTED_PROTOCOL_VERSIONS = frozenset({
 LATEST_PROTOCOL_VERSION = "2025-11-25"
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 STDERR_LIMIT = 32 * 1024
+CLIENT_INFO = {"name": "mcplock", "version": __version__}
 
 
 def _reject_json_constant(value):
@@ -178,7 +181,7 @@ async def discover(command: Sequence[str], timeout: float = 30.0) -> Discovery:
         initialized = await client.request("initialize", {
             "protocolVersion": LATEST_PROTOCOL_VERSION,
             "capabilities": {},
-            "clientInfo": {"name": "mcplock", "version": "0.1.0"},
+            "clientInfo": dict(CLIENT_INFO),
         })
         protocol_version = initialized.get("protocolVersion")
         if protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
