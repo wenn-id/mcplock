@@ -48,6 +48,8 @@ def main():
             "duplicate",
             "cycle",
             "invalid-tool",
+            "too-many-pages",
+            "too-many-tools",
             "invalid-cursor",
             "rpc-error",
             "bad-jsonrpc",
@@ -146,6 +148,29 @@ def main():
             "jsonrpc": "2.0",
             "id": request["id"],
             "error": {"code": -32603, "message": "fixture failure"},
+        })
+        return
+    if args.scenario == "too-many-pages":
+        page = 0
+        while True:
+            page += 1
+            send({
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {
+                    "tools": [tool(f"tool_{page}")],
+                    "nextCursor": f"p{page}",
+                },
+            })
+            request = receive()
+        return
+    if args.scenario == "too-many-tools":
+        send({
+            "jsonrpc": "2.0",
+            "id": request["id"],
+            "result": {
+                "tools": [tool(f"tool_{i}") for i in range(4)],
+            },
         })
         return
     if args.scenario == "cycle":
