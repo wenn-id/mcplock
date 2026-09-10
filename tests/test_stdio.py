@@ -62,6 +62,20 @@ class DiscoveryTests(unittest.TestCase):
         result = asyncio.run(discover(command("legacy"), timeout=2.0))
         self.assertEqual(result.protocol_version, "2024-11-05")
 
+    def test_tool_count_triggers_discovery_error(self):
+        with patch("mcplock.stdio.MAX_TOOLS", 3):
+            self.assert_discovery_error(
+                "too-many-tools",
+                "exposed more than 3 tools",
+            )
+
+    def test_page_count_triggers_discovery_error(self):
+        with patch("mcplock.stdio.MAX_PAGES", 3):
+            self.assert_discovery_error(
+                "too-many-pages",
+                "paged more than 3 times",
+            )
+
     def test_notifications_and_rejected_client_requests_continue(self):
         for scenario in ("notification", "client-request"):
             with self.subTest(scenario=scenario):

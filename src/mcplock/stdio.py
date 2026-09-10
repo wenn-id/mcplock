@@ -19,6 +19,8 @@ LATEST_PROTOCOL_VERSION = "2025-11-25"
 MAX_MESSAGE_BYTES = 16 * 1024 * 1024
 STDERR_LIMIT = 32 * 1024
 CLIENT_INFO = {"name": "mcplock", "version": __version__}
+MAX_PAGES = 1000
+MAX_TOOLS = 10_000
 
 
 def _reject_json_constant(value):
@@ -212,6 +214,10 @@ async def discover(command: Sequence[str], timeout: float = 30.0) -> Discovery:
                     "MCP tools/list returned an invalid tools array"
                 )
             tools.extend(page_tools)
+            if len(tools) > MAX_TOOLS:
+                raise DiscoveryError(
+                    f"MCP server exposed more than {MAX_TOOLS} tools"
+                )
             next_cursor = page.get("nextCursor")
             if next_cursor is None:
                 break
@@ -224,6 +230,10 @@ async def discover(command: Sequence[str], timeout: float = 30.0) -> Discovery:
                     f"MCP pagination cursor repeated: {next_cursor}"
                 )
             seen_cursors.add(next_cursor)
+            if len(seen_cursors) > MAX_PAGES:
+                raise DiscoveryError(
+                    f"MCP server paged more than {MAX_PAGES} times"
+                )
             cursor = next_cursor
 
         names = []
