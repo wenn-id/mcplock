@@ -142,6 +142,35 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn("WARNING", output)
 
+    def test_fail_on_warning_errors_on_warnings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock = str(Path(directory) / "mcp.lock.json")
+            self.invoke(["update", "--lock", lock, "--", *server("baseline")])
+            with patch("mcplock.cli.compare_locks") as compare:
+                from mcplock.contract import Change
+                compare.return_value = [Change("warning", "server.version", "changed")]
+                code, _, _ = self.invoke(
+                    ["check", "--fail-on", "warning", "--lock", lock, "--", *server("baseline")]
+                )
+                self.assertEqual(code, 1)
+
+    def test_fail_on_info_errors_on_info(self):
+        with tempfile.TemporaryDirectory() as directory:
+            lock = str(Path(directory) / "mcp.lock.json")
+            self.invoke(["update", "--lock", lock, "--", *server("baseline")])
+            with patch("mcplock.cli.compare_locks") as compare:
+                from mcplock.contract import Change
+                compare.return_value = [Change("info", "server.version", "changed")]
+                code, _, _ = self.invoke(
+                    ["check", "--fail-on", "info", "--lock", lock, "--", *server("baseline")]
+                )
+                self.assertEqual(code, 1)
+
+    def test_fail_on_rejects_unknown_values(self):
+        with self.assertRaises(SystemExit) as caught:
+            self.invoke(["check", "--fail-on", "bogus", "--", "fixture"])
+        self.assertEqual(caught.exception.code, 2)
+
     def test_keyboard_interrupt_returns_130(self):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")

@@ -39,6 +39,11 @@ def parser():
         command.add_argument("--lock", type=Path, default=Path("mcp.lock.json"))
         command.add_argument("--timeout", type=positive_timeout, default=30.0)
         command.add_argument("--json", action="store_true")
+        command.add_argument(
+            "--fail-on",
+            choices=("breaking", "warning", "info"),
+            default="breaking",
+        )
         command.add_argument("server_command", nargs=argparse.REMAINDER)
     return result
 
@@ -135,7 +140,11 @@ def main(argv=None):
             print(_emit_json_check(current, changes), end="")
         else:
             print(render_changes(changes), end="")
-        return 1 if any(item.severity == "breaking" for item in changes) else 0
+        severities = ("breaking", "warning", "info")
+        threshold = severities.index(args.fail_on)
+        return 1 if any(
+            severities.index(item.severity) <= threshold for item in changes
+        ) else 0
     except KeyboardInterrupt:
         return 130
     except (ContractError, DiscoveryError, OSError) as exc:
