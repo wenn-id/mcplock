@@ -9,6 +9,7 @@ description = "Catch breaking MCP tool changes before your agents do"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 keywords = ["ai-agents", "mcp", "model-context-protocol", "testing"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -19,8 +20,15 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/wenn-id/mcplock"
+Repository = "https://github.com/wenn-id/mcplock"
+Issues = "https://github.com/wenn-id/mcplock/issues"
 
 [project.scripts]
 mcplock = "mcplock.cli:main"

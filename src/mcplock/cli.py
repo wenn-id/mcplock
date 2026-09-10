@@ -14,6 +14,7 @@ from .contract import (
     load_lock,
     write_lock,
 )
+from . import __version__
 from .stdio import DiscoveryError, SUPPORTED_PROTOCOL_VERSIONS, discover
 
 
@@ -28,6 +29,9 @@ def parser():
     result = argparse.ArgumentParser(
         prog="mcplock",
         description="Catch breaking MCP tool changes before your agents do.",
+    )
+    result.add_argument(
+        "--version", action="version", version=f"mcplock {__version__}"
     )
     commands = result.add_subparsers(dest="action", required=True)
     for action in ("update", "check"):
